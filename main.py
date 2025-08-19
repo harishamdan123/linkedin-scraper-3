@@ -1,3 +1,31 @@
+import os
+from fastapi import FastAPI, Body
+from pydantic import BaseModel
+from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
+
+app = FastAPI()
+
+# Read login credentials from environment
+LINKEDIN_EMAIL = os.getenv("LINKEDIN_EMAIL")
+LINKEDIN_PASSWORD = os.getenv("LINKEDIN_PASSWORD")
+
+
+class JobRequest(BaseModel):
+    job_title: str
+    location: str = "India"
+    mode: str = "easyapply"  # "easyapply" or "directapply"
+    limit: int = 10
+
+
+def linkedin_login(page):
+    """Login to LinkedIn using credentials from env vars"""
+    page.goto("https://www.linkedin.com/login")
+    page.fill("input#username", LINKEDIN_EMAIL)
+    page.fill("input#password", LINKEDIN_PASSWORD)
+    page.click("button[type='submit']")
+    page.wait_for_load_state("networkidle")
+
+
 @app.post("/linkedin/jobs")
 def linkedin_jobs(req: JobRequest = Body(...)):
     results = []
@@ -7,6 +35,10 @@ def linkedin_jobs(req: JobRequest = Body(...)):
         context = browser.new_context()
         page = context.new_page()
 
+        # Step 1: Login
+        linkedin_login(page)
+
+        # Step 2: Start scraping
         jobs_collected = 0
         page_size = 25
 
@@ -46,6 +78,7 @@ def linkedin_jobs(req: JobRequest = Body(...)):
                             continue
                         job_page = context.new_page()
                         job_page.goto(link)
+
                         company_apply_url = None
                         try:
                             job_page.click("a[href*='applyRedirect']", timeout=5000)
@@ -54,6 +87,7 @@ def linkedin_jobs(req: JobRequest = Body(...)):
                             company_apply_url = popup.url
                         except PWTimeout:
                             pass
+
                         results.append({
                             "role": role,
                             "company_name": company,
